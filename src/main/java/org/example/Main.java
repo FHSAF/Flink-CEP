@@ -1,37 +1,54 @@
 package org.example;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
-import org.apache.flink.connector.kafka.source.KafkaSource; // Import if needed by Source Providers
+import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import java.time.Duration;
 
-// Import Models
-import org.example.models.EMGSensorReading;
-import org.example.models.EyeGazeSensorReading;
-import org.example.models.SensorReading;
-import org.example.models.SmartwatchSensorReading;
+// Import Refactored Models
+import org.example.models.EMGReading;
+import org.example.models.EyeGazeReading;
+import org.example.models.MoCapReading;
+import org.example.models.SmartwatchReading;
+// RebaScore model remains in models package
+import org.example.models.RebaScore;
 
-// Import Sources
-import org.example.sources.*;
-import org.example.processing.DataParser;
-// Import Processors
-import org.example.processing.EMGProcessing;
-import org.example.processing.ErgonomicsProcessor;
-import org.example.processing.EyeGazeProcessing;
-import org.example.processing.RebaMapper;
-import org.example.processing.SmartwatchCEPProcessor;
-import org.example.processing.SmartwatchSensorReadingParser;
-import org.example.processing.SmartwatchSlidingWindowProcessor;
+// Import Refactored Sources (Providers only needed here)
+import org.example.sources.provider.MoCapKafkaSourceProvider;
+import org.example.sources.provider.EMGKafkaSourceProvider;
+import org.example.sources.provider.SmartwatchKafkaSourceProvider;
+import org.example.sources.provider.EyeGazeKafkaSourceProvider;
 
-// Import Sinks
-import org.example.sinks.*;
+// Import Refactored Processors (from sub-packages)
+import org.example.processing.mocap.MoCapErgonomicsProcessor;
+import org.example.processing.mocap.MoCapRebaProcessor; // Contains the MapFunction now
+import org.example.processing.emg.EMGFatigueProcessor;
+import org.example.processing.eyegaze.EyeGazeAttentionProcessor;
+import org.example.processing.smartwatch.SmartwatchAvgHrProcessor;
+import org.example.processing.smartwatch.SmartwatchHrvProcessor; // Planned
 
-// Import DBConfig
+// Import Refactored Sinks (from sub-packages)
+import org.example.sinks.db.MoCapRawDbSink;
+import org.example.sinks.db.RebaScoreDbSink;
+import org.example.sinks.db.AvgAngleAlertDbSink;
+import org.example.sinks.db.EMGRawDbSink;
+import org.example.sinks.db.EMGFatigueAlertDbSink;
+import org.example.sinks.db.SmartwatchRawDbSink;
+import org.example.sinks.db.SmartwatchAvgHrDbSink; // New
+import org.example.sinks.db.EyeGazeRawDbSink; // New
+import org.example.sinks.db.EyeGazeAttentionAlertDbSink; // New
+
+import org.example.sinks.kafka.MoCapErgonomicsAlertKafkaSink;
+import org.example.sinks.kafka.EMGFatigueAlertKafkaSink;
+import org.example.sinks.kafka.SmartwatchAvgHrAlertKafkaSink;
+import org.example.sinks.kafka.SmartwatchHrvAlertKafkaSink; // Planned
+import org.example.sinks.kafka.EyeGazeAlertKafkaSink;
+
+
+// Import Configs
 import org.example.config.DBConfig;
 import org.example.config.KafkaConfig;
-// Import KafkaConfig IF your source/sink providers require constants from it
-// import org.example.config.KafkaConfig;
 
 // Other imports
 import org.slf4j.Logger;
@@ -41,49 +58,54 @@ import java.util.Set;
 public class Main {
     private static final Logger logger = LoggerFactory.getLogger(Main.class);
 
-    // --- Configuration Variables ---
-    // Flink Cluster
+    // --- Configuration Variables (Keep as defined before) ---
     private static final String FLINK_MASTER_HOST = "192.168.50.106";
     private static final int FLINK_MASTER_PORT = 8081;
     private static final String JAR_PATH = "/home/rootr2/development/new/cep_pipeline_java/target/HRC-CEP-1.0-SNAPSHOT.jar";
+    private static final String KAFKA_BROKERS = KafkaConfig.BOOTSTRAP_SERVERS;
 
-    // Kafka Brokers - Needed for Source AND Sink Providers
-    private static final String KAFKA_BROKERS = KafkaConfig.BOOTSTRAP_SERVERS; 
-
-    // Kafka Topics (Defined locally - or use KafkaConfig if preferred AND providers support it)
-    // !!! REPLACE with your actual topic names !!!
-
-    // EMG Topics are handled inside EMGSourceProvider
-    private static final String AVG_ANGLE_ALERT_TOPIC = "km_average_angle_alerts";
-    private static final String REBA_SCORE_TOPIC = "km_reba_scores_json";
+    // Kafka Topics (Defined locally or use KafkaConfig)
+    // Ergonomics/REBA Alerts
+    private static final String MOCAP_AVG_ANGLE_ALERT_TOPIC = "km_average_angle_alerts"; // Example name
+    private static final String MOCAP_REBA_SCORE_TOPIC = "km_reba_scores_json"; // Example name
+    // Fatigue/Stress Alerts
     private static final String EMG_FATIGUE_ALERT_TOPIC = "km_emg_fatigue_alerts";
-    private static final String ECG_ALERT_TOPIC = "km_ecg_cep_alerts";
-    private static final String ECG_AVG_ALERT_TOPIC = "km_ecg_avg_alerts";
+    private static final String SMARTWATCH_AVG_HR_ALERT_TOPIC = "km_ecg_avg_alerts"; // For Avg HR
+    private static final String SMARTWATCH_HRV_ALERT_TOPIC = "km_hrv_stress_alerts"; // Planned for HRV
+    // Attention Alerts
+    private static final String EYE_GAZE_ALERT_TOPIC = "km_gaze_alerts"; // Single topic for both gaze alert types
 
     // Consumer Groups
+    private static final String MOCAP_GROUP_ID = KafkaConfig.GROUP_ID; // Use base group ID or specific
     private static final String EMG_GROUP_ID = "flink-emg-processor-group";
+    private static final String SMARTWATCH_GROUP_ID = KafkaConfig.SMARTWATCH_GROUP_ID != null ? KafkaConfig.SMARTWATCH_GROUP_ID : KafkaConfig.GROUP_ID + "-smartwatch";
+    private static final String EYE_GAZE_GROUP_ID = "flink-gaze-processor-group";
 
-    // Processing Params
+
+    // Processing Params (Keep as defined before)
     private static final Set<String> MUSCLES_TO_MONITOR = Set.of(
             "trapezius_left", "trapezius_right", "deltoids_left", "deltoids_right",
             "wrist_extensors_right", "wrist_flexor_right"
+            // Add other muscles from EMGReading model if needed
     );
-    private static final double REBA_TASK_LOAD_KG = 1.0; // VERIFY
-    private static final int REBA_COUPLING_SCORE = 0; // VERIFY (0-3)
-    private static final int REBA_ACTIVITY_SCORE = 1; // VERIFY (0 or 1)
-    // --- End Configuration Variables ---
+    private static final double REBA_TASK_LOAD_KG = 1.0;
+    private static final int REBA_COUPLING_SCORE = 0;
+    private static final int REBA_ACTIVITY_SCORE = 1;
+    private static final Duration EYE_GAZE_DURATION_THRESHOLD = Duration.ofSeconds(15); // Example: Alert if inattentive for 15s
 
 
     public static void main(String[] args) {
 
         logger.info("#############################################");
         logger.info("Setting up Flink Remote Environment...");
-        // ... logging ...
+        logger.info("  Master: {}:{}", FLINK_MASTER_HOST, FLINK_MASTER_PORT);
+        logger.info("  JAR Path: {}", JAR_PATH);
         logger.info("#############################################");
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.createRemoteEnvironment(
                 FLINK_MASTER_HOST, FLINK_MASTER_PORT, JAR_PATH);
 
+        // Optional: Disable checkpointing for simpler local testing if needed
         // env.getCheckpointConfig().disableCheckpointing();
 
         try {
@@ -91,105 +113,112 @@ public class Main {
             logger.info("Building Flink Data Pipeline...");
             logger.info("#############################################");
 
-            KafkaSource<String> rokokoStringSource = MoCapSourceProvider.getKafkaSource(); // Gets configured KafkaSource<String>
-            DataStream<String> rawRokokoStringStream = env.fromSource(rokokoStringSource, WatermarkStrategy.noWatermarks(), "RokokoKafkaSource");
-            // Parse AFTER adding source
-            DataStream<SensorReading> rawSensorStream = rawRokokoStringStream
-                .map(DataParser::parseSensorReading) // Assuming DataParser exists
-                .filter(value -> value != null); // Filter nulls from parser
-            // Apply final filter
-            DataStream<SensorReading> sensorStream = rawSensorStream.filter(sensor -> sensor.getThingid() != null && !sensor.getThingid().isEmpty());
-
+            // --- Source: MoCap Data ---
+            KafkaSource<MoCapReading> moCapSource = MoCapKafkaSourceProvider.getKafkaSource();
+            DataStream<MoCapReading> moCapStream = env.fromSource(moCapSource, WatermarkStrategy.noWatermarks(), "MoCapKafkaSource")
+                                                     .filter(value -> value != null && value.getThingid() != null && !value.getThingid().isEmpty())
+                                                     .name("FilterValidMoCap");
 
             // --- Source: Smartwatch Data ---
-            KafkaSource<String> smartwatchStringSource = SmartwatchSourceProvider.getSmartwatchSource(); // Gets configured KafkaSource<String>
-            DataStream<String> rawSmartwatchStringStream = env.fromSource(smartwatchStringSource, WatermarkStrategy.noWatermarks(), "SmartwatchKafkaSource");
-            // Parse AFTER adding source
-            DataStream<SmartwatchSensorReading> smartwatchRawSensorStream = rawSmartwatchStringStream
-                .map(SmartwatchSensorReadingParser::parse) // Assuming parser exists
-                .filter(value -> value != null); // Filter nulls from parser
-            // Apply final filter
-            DataStream<SmartwatchSensorReading> smartwatchSensorStream = smartwatchRawSensorStream.filter(sensor -> sensor.getThingid() != null && !sensor.getThingid().isEmpty());
+            KafkaSource<SmartwatchReading> smartwatchSource = SmartwatchKafkaSourceProvider.getSmartwatchSource();
+            DataStream<SmartwatchReading> smartwatchStream = env.fromSource(smartwatchSource, WatermarkStrategy.noWatermarks(), "SmartwatchKafkaSource")
+                                                                 .filter(value -> value != null && value.getThingid() != null && !value.getThingid().isEmpty())
+                                                                 .name("FilterValidSmartwatch");
 
-            // // --- Source: EMG Data ---
-            // // CORRECTED: Call the existing method with arguments
-            KafkaSource<EMGSensorReading> emgKafkaSource = EMGSourceProvider.getEMGKafkaSource(KAFKA_BROKERS, EMG_GROUP_ID);
-            DataStream<EMGSensorReading> rawEmgStream = env.fromSource(emgKafkaSource, WatermarkStrategy.noWatermarks(), "EMGKafkaSource");
-            DataStream<EMGSensorReading> emgSensorStream = rawEmgStream.filter(sensor -> sensor != null && sensor.getThingid() != null && !sensor.getThingid().isEmpty());
+            // --- Source: EMG Data ---
+            KafkaSource<EMGReading> emgSource = EMGKafkaSourceProvider.getEMGKafkaSource(KAFKA_BROKERS, EMG_GROUP_ID);
+            DataStream<EMGReading> emgStream = env.fromSource(emgSource, WatermarkStrategy.noWatermarks(), "EMGKafkaSource")
+                                                  .filter(value -> value != null && value.getThingid() != null && !value.getThingid().isEmpty())
+                                                  .name("FilterValidEMG");
+
+
+            // --- Source: Eye Gaze Attention ---
+            String gazeAttentionTopic = KafkaConfig.EYE_GAZE_TOPIC; // Get topic from config
+            KafkaSource<EyeGazeReading> gazeSource = EyeGazeKafkaSourceProvider.getEyeGazeKafkaSource(KAFKA_BROKERS, gazeAttentionTopic, EYE_GAZE_GROUP_ID);
+            DataStream<EyeGazeReading> gazeStream = env.fromSource(gazeSource, WatermarkStrategy.noWatermarks(), "GazeAttentionKafkaSource")
+                                                       .filter(value -> value != null && value.getThingid() != null && !value.getThingid().isEmpty())
+                                                       .name("FilterValidGaze");
 
 
             // --- Processing ---
             logger.info("Configuring Processing Steps...");
-            DataStream<String> averageAngleAlerts = ErgonomicsProcessor.processAverageAnglesForFeedback(sensorStream);
-            DataStream<String> rebaScoreJsonStream = sensorStream
-                .map(new RebaMapper(REBA_TASK_LOAD_KG, REBA_COUPLING_SCORE, REBA_ACTIVITY_SCORE))
-                .filter(json -> json != null);
-            DataStream<String> emgFatigueAlerts = EMGProcessing.processEMGFatigue(emgSensorStream, MUSCLES_TO_MONITOR);
-            DataStream<String> smartwatchAlerts = SmartwatchCEPProcessor.applyCEP(smartwatchSensorStream);
-            DataStream<String> smartwatchWindowAlerts = SmartwatchSlidingWindowProcessor.applySlidingWindowAlerts(smartwatchSensorStream);
+
+            // MoCap Processing
+            DataStream<String> averageAngleAlerts = MoCapErgonomicsProcessor.processAverageAnglesForFeedback(moCapStream);
+            DataStream<String> rebaScoreJsonStream = moCapStream
+                .map(new MoCapRebaProcessor.RebaScoreMapFunction(REBA_TASK_LOAD_KG, REBA_COUPLING_SCORE, REBA_ACTIVITY_SCORE)) // Use MapFunction from Processor class
+                .filter(json -> json != null)
+                .name("CalculateREBAScore");
+
+            // EMG Processing (RMS based fatigue)
+            DataStream<String> emgFatigueAlerts = EMGFatigueProcessor.processEMGFatigueRMS(emgStream, MUSCLES_TO_MONITOR);
+
+            // Smartwatch Processing
+            DataStream<String> smartwatchAvgHrAlerts = SmartwatchAvgHrProcessor.applySlidingWindowAlerts(smartwatchStream);
+            // DataStream<String> smartwatchHrvAlerts = SmartwatchHrvProcessor.processHrv(smartwatchStream); // Planned
+
+            // Eye Gaze Processing
+            DataStream<String> gazeAlerts = EyeGazeAttentionProcessor.processGazeAttention(gazeStream, EYE_GAZE_DURATION_THRESHOLD);
+
 
             // --- Sinks ---
             logger.info("Configuring Sinks...");
 
             // Define DB connection details using DBConfig
-            String dbUrlBase = DBConfig.DB_URL;
+            String dbUrlBase = DBConfig.DB_URL; // e.g., "jdbc:postgresql://host:port/"
             String dbUser = DBConfig.DB_USER;
             String dbPassword = DBConfig.DB_PASSWORD;
 
-            // Sink Average Angle Alerts (Kafka + DB using DBConfig)
+            // --- Kafka Sinks ---
             averageAngleAlerts.print("AVG_ANGLE_ALERT");
-            // CORRECTED: Pass arguments required by sink provider
-            averageAngleAlerts.sinkTo(MoCapKafkaSink.getKafkaSink(KAFKA_BROKERS, AVG_ANGLE_ALERT_TOPIC));
-            averageAngleAlerts.sinkTo(new MoCapAverageAngleAlertDatabaseSink(dbUrlBase + DBConfig.ROKOKO_AVERAGE_DB_NAME, dbUser, dbPassword));
+            averageAngleAlerts.sinkTo(MoCapErgonomicsAlertKafkaSink.getKafkaSink(KAFKA_BROKERS, MOCAP_AVG_ANGLE_ALERT_TOPIC))
+                              .name("AvgAngleAlertKafkaSink");
 
-            // Sink REBA Scores (Kafka + DB using DBConfig)
             rebaScoreJsonStream.print("REBA_SCORE_JSON");
-            // CORRECTED: Pass arguments required by sink provider
-            rebaScoreJsonStream.sinkTo(MoCapKafkaSink.getKafkaSink(KAFKA_BROKERS, REBA_SCORE_TOPIC));
-            rebaScoreJsonStream.sinkTo(new MoCapRebaScoreDatabaseSink(dbUrlBase + DBConfig.ROKOKO_REBA_SCORE_DB_NAME, dbUser, dbPassword));
+            rebaScoreJsonStream.sinkTo(MoCapErgonomicsAlertKafkaSink.getKafkaSink(KAFKA_BROKERS, MOCAP_REBA_SCORE_TOPIC)) // Can reuse the same sink provider if target is just String
+                               .name("RebaScoreKafkaSink");
 
-            // Sink Smartwatch Alerts (to Kafka)
-            smartwatchAlerts.print("ECG_ALERT");
-            // CORRECTED: Pass arguments required by sink provider
-            smartwatchAlerts.sinkTo(SmartWatchAlertSink.getKafkaSink(KAFKA_BROKERS, ECG_ALERT_TOPIC));
-            smartwatchWindowAlerts.print("ECG_AVG_ALERT");
-            // CORRECTED: Pass arguments required by sink provider
-            smartwatchWindowAlerts.sinkTo(SlidingWindowAlertSinkECG.getKafkaSink(KAFKA_BROKERS, ECG_AVG_ALERT_TOPIC));
-
-            // Sink Filtered Raw Data to DB (Using DBConfig)
-            logger.info("Configuring Raw Data Sinks...");
-            sensorStream.sinkTo(new MoCapRawDatabaseSink(dbUrlBase + DBConfig.ROKOKO_DB_NAME, dbUser, dbPassword));
-            smartwatchSensorStream.sinkTo(new SmartWatchDatabaseSink(dbUrlBase + DBConfig.SMARTWATCH_DB_NAME, dbUser, dbPassword));
-
-            logger.info("Configuring Raw EMG Data Sink...");
             emgFatigueAlerts.print("EMG_FATIGUE_ALERT");
-            emgFatigueAlerts.sinkTo(EMGKafkaSink.getKafkaSink(KAFKA_BROKERS, EMG_FATIGUE_ALERT_TOPIC));
-            emgSensorStream.sinkTo(new EMGRawDatabaseSink( // Use the new Sink
-                                  DBConfig.DB_URL,        // Base URL
-                                  DBConfig.EMG_DB_NAME,   // Database Name
-                                  DBConfig.DB_USER,
-                                  DBConfig.DB_PASSWORD))
-                           .name("RawEMGDbSink");
-            // EMG Alerts to Kafka
+            emgFatigueAlerts.sinkTo(EMGFatigueAlertKafkaSink.getKafkaSink(KAFKA_BROKERS, EMG_FATIGUE_ALERT_TOPIC))
+                            .name("EMGFatigueAlertKafkaSink");
 
-            // --- Source: Eye Gaze Attention ---
-            String gazeAttentionTopic = KafkaConfig.EYE_GAZE_TOPIC;
-            String gazeGroupId = "flink-gaze-processor-group";
-            KafkaSource<EyeGazeSensorReading> gazeSource = EyeGazeSourceProvider.getEyeGazeKafkaSource(KAFKA_BROKERS, gazeAttentionTopic, gazeGroupId);
-            DataStream<EyeGazeSensorReading> rawGazeStream = env.fromSource(gazeSource, WatermarkStrategy.noWatermarks(), "GazeAttentionKafkaSource");
-            DataStream<EyeGazeSensorReading> gazeStream = rawGazeStream.filter(g -> g != null && g.getThingid() != null && g.getTimestamp() != null);
+            smartwatchAvgHrAlerts.print("SMARTWATCH_AVG_HR_ALERT");
+            smartwatchAvgHrAlerts.sinkTo(SmartwatchAvgHrAlertKafkaSink.getKafkaSink(KAFKA_BROKERS, SMARTWATCH_AVG_HR_ALERT_TOPIC))
+                                 .name("SmartwatchAvgHrAlertKafkaSink");
 
-            // --- Processing: Eye Gaze Inattention (Both Types) ---
-            Duration durationThreshold = Duration.ofSeconds(5); // Threshold for continuous inattention
-            // The average threshold (e.g., 50%) is configured inside EyeGazeProcessing for now
-            DataStream<String> gazeAlerts = EyeGazeProcessing.processGazeAttention(gazeStream, durationThreshold);
+            // smartwatchHrvAlerts.print("SMARTWATCH_HRV_ALERT"); // Planned
+            // smartwatchHrvAlerts.sinkTo(SmartwatchHrvAlertKafkaSink.getKafkaSink(KAFKA_BROKERS, SMARTWATCH_HRV_ALERT_TOPIC))
+            //                    .name("SmartwatchHrvAlertKafkaSink"); // Planned
 
-            // --- Sink: Eye Gaze Alerts ---
-            gazeAlerts.print("GAZE_ALERT"); // Will print both types of alerts
-            String gazeAlertTopic = "gaze_alerts"; // Single topic for both alert types, or use separate sinks
-            gazeAlerts.sinkTo(EyeGazeKafkaSink.getKafkaSink(KAFKA_BROKERS, gazeAlertTopic))
+            gazeAlerts.print("GAZE_ALERT");
+            gazeAlerts.sinkTo(EyeGazeAlertKafkaSink.getKafkaSink(KAFKA_BROKERS, EYE_GAZE_ALERT_TOPIC))
                       .name("GazeAlertKafkaSink");
 
+
+            // --- Database Sinks ---
+            logger.info("Configuring Database Sinks...");
+
+            // Raw Data Sinks
+            moCapStream.sinkTo(new MoCapRawDbSink(dbUrlBase + DBConfig.ROKOKO_DB_NAME, DBConfig.ROKOKO_DB_TABLE, dbUser, dbPassword))
+                       .name("RawMoCapDbSink");
+            smartwatchStream.sinkTo(new SmartwatchRawDbSink(dbUrlBase + DBConfig.SMARTWATCH_DB_NAME, DBConfig.SMARTWATCH_DB_TABLE, dbUser, dbPassword))
+                            .name("RawSmartwatchDbSink");
+            emgStream.sinkTo(new EMGRawDbSink(dbUrlBase, DBConfig.EMG_DB_NAME, dbUser, dbPassword)) // Passes base URL and DB name
+                     .name("RawEMGDbSink");
+            // gazeStream.sinkTo(new EyeGazeRawDbSink(dbUrlBase + DBConfig.EYEGAZE_DB_NAME, DBConfig.EYEGAZE_RAW_TABLE, dbUser, dbPassword)) // Assumes config exists
+            //           .name("RawEyeGazeDbSink"); // Optional Raw Gaze Sink
+
+            // Processed Data Sinks
+            averageAngleAlerts.sinkTo(new AvgAngleAlertDbSink(dbUrlBase + DBConfig.ROKOKO_AVERAGE_DB_NAME, DBConfig.ROKOKO_AVERAGE_DB_TABLE, dbUser, dbPassword))
+                              .name("AvgAngleAlertDbSink");
+            rebaScoreJsonStream.sinkTo(new RebaScoreDbSink(dbUrlBase + DBConfig.ROKOKO_REBA_SCORE_DB_NAME, DBConfig.ROKOKO_REBA_SCORE_DB_TABLE, dbUser, dbPassword))
+                               .name("RebaScoreDbSink");
+            emgFatigueAlerts.sinkTo(new EMGFatigueAlertDbSink(dbUrlBase + DBConfig.EMG_AVERAGE_DB_NAME, DBConfig.EMG_AVERAGE_DB_TABLE, dbUser, dbPassword)) // Assuming table name from config
+                            .name("EMGFatigueAlertDbSink");
+            // smartwatchAvgHrAlerts.sinkTo(new SmartwatchAvgHrDbSink(dbUrlBase + DBConfig.SMARTWATCH_AVERAGE_DB_NAME, DBConfig.SMARTWATCH_AVERAGE_DB_TABLE, dbUser, dbPassword)) // Assumes config exists
+            //                      .name("SmartwatchAvgHrDbSink"); // Optional Avg HR Sink
+            // gazeAlerts.sinkTo(new EyeGazeAttentionAlertDbSink(dbUrlBase + DBConfig.EYEGAZE_DB_NAME, DBConfig.EYEGAZE_ALERT_TABLE, dbUser, dbPassword)) // Assumes config exists
+            //           .name("EyeGazeAlertDbSink"); // Optional Gaze Alert Sink
 
 
             logger.info("#############################################");
@@ -198,7 +227,7 @@ public class Main {
 
             // Execute Flink job
             logger.info("Starting Flink job execution...");
-            env.execute("HRC Real-time Ergonomics & Fatigue Pipeline");
+            env.execute("HRC Real-time Monitoring Pipeline (Refactored)");
             logger.info("#############################################");
             logger.info("Flink job submitted successfully (check Flink UI for status)");
             logger.info("#############################################");
@@ -207,7 +236,7 @@ public class Main {
             logger.error("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@");
             logger.error("An error occurred while building or executing the Flink job: ", e);
             logger.error("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@");
-             System.exit(1);
+             System.exit(1); // Exit if setup fails
         }
     }
 }
