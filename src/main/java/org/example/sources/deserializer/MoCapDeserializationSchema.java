@@ -13,6 +13,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 
@@ -129,7 +130,8 @@ public class MoCapDeserializationSchema implements KafkaRecordDeserializationSch
     private static String getTextOrDefaultTimestamp(JsonNode node, String field) {
         String timestampStr = getText(node, field, null);
         if (timestampStr == null || timestampStr.trim().isEmpty()) {
-            String defaultTimestamp = LocalDateTime.now().format(CURRENT_TIME_FORMATTER);
+            // String defaultTimestamp = LocalDateTime.now().format(CURRENT_TIME_FORMATTER);
+            String defaultTimestamp = Instant.now().toString(); // ISO 8601 format
             logger.warn("MoCap Deserializer: Missing/empty timestamp field '{}'. Defaulting to current time: {}", field, defaultTimestamp);
             return defaultTimestamp;
         } else {

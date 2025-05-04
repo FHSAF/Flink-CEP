@@ -20,7 +20,7 @@ import java.time.format.DateTimeParseException;
 // Renamed from SmartWatchDatabaseSink
 public class SmartwatchRawDbSink implements Sink<SmartwatchReading> { // Implement Serializable
     private static final Logger logger = LoggerFactory.getLogger(SmartwatchRawDbSink.class);
-    private static final DateTimeFormatter TIMESTAMP_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final DateTimeFormatter TIMESTAMP_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss:SSS");
 
     private final String jdbcUrl;
     private final String username;

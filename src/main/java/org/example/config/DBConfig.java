@@ -6,16 +6,20 @@ public class DBConfig {
 	public static final String DB_PASSWORD = "postgres";
 	// Raw data tables
 	public static final String ROKOKO_DB_NAME = "rokoko_db";
-	public static final String ROKOKO_DB_TABLE = "rokoko_joint_angles";
+	public static final String ROKOKO_DB_TABLE = "MoCapRawData";
 	// Sliding window tables
-	public static final String ROKOKO_AVERAGE_DB_NAME = "rokoko_average_db";
-	public static final String ROKOKO_AVERAGE_DB_TABLE = "average_angles";
+	public static final String ROKOKO_AVERAGE_DB_NAME = "rokoko_average_alerts_db";
+	public static final String ROKOKO_AVERAGE_DB_TABLE = "AverageAngleAlerts";
 
 	public static final String ROKOKO_REBA_SCORE_DB_NAME = "rebascore_db";
-	public static final String ROKOKO_REBA_SCORE_DB_TABLE = "reba_scores";
+	public static final String ROKOKO_REBA_SCORE_DB_TABLE = "RebaScores";
 	// Raw data tables
 	public static final String SMARTWATCH_DB_NAME = "smartwatch_db";
-	public static final String SMARTWATCH_DB_TABLE = "heartrate_data";
+	public static final String SMARTWATCH_DB_TABLE = "SmartwatchRawData";
+
+	public static final String GAZE_STATE_DB_NAME = "gaze_state_db";
+	public static final String GAZE_STATE_TABLE = "EyeGazeRawData";
+	public static final String GAZE_STATE_ALERT_TABLE = "EyeGazeAttentionAlerts";
 	// Sliding window tables
 	public static final String SMARTWATCH_AVERAGE_DB_NAME = "smartwatch_average_db";
 	public static final String SMARTWATCH_AVERAGE_DB_TABLE = "smartwatch_average";

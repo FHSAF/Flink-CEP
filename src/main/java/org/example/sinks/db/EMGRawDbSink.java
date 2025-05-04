@@ -26,7 +26,7 @@ import java.time.format.DateTimeParseException;
 // Renamed from EMGRawDatabaseSink
 public class EMGRawDbSink implements Sink<EMGReading> { // Implement Serializable
     private static final Logger logger = LoggerFactory.getLogger(EMGRawDbSink.class);
-    private static final DateTimeFormatter TIMESTAMP_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final DateTimeFormatter TIMESTAMP_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss:SSS");
 
     private final String jdbcUrlBase;
     private final String dbName;

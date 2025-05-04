@@ -24,7 +24,7 @@ import java.time.format.DateTimeParseException;
 // Renamed from MoCapRawDatabaseSink
 public class MoCapRawDbSink implements Sink<MoCapReading> { // Implement Serializable
     private static final Logger logger = LoggerFactory.getLogger(MoCapRawDbSink.class);
-    private static final DateTimeFormatter TIMESTAMP_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final DateTimeFormatter TIMESTAMP_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss:SSS");
 
     private final String jdbcUrl;
     private final String username;
@@ -81,7 +81,7 @@ public class MoCapRawDbSink implements Sink<MoCapReading> { // Implement Seriali
                 "neck_flex_ext, neck_torsion, head_tilt, torso_tilt, " +
                 "torso_side_tilt, back_curve, back_torsion, " +
                 "knee_flex_ext_left, knee_flex_ext_right " +
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"; // 25 placeholders
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"; // 25 placeholders
             initializeJdbc();
         }
 

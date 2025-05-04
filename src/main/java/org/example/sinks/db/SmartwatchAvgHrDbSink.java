@@ -62,7 +62,8 @@ public class SmartwatchAvgHrDbSink implements Sink<String> {
             this.password = password;
             // TODO: Define your table schema and corresponding INSERT SQL
             // Example assumes columns: time, thingid, window_end_ts, avg_heart_rate, is_alert
-            this.insertSql = "INSERT INTO " + tableName + " (time, thingid, window_end_ts, avg_heart_rate, is_alert) VALUES (?, ?, ?, ?, ?)";
+            this.insertSql = "INSERT INTO " + tableName + " (time, thingid, window_end_ts, avg_heart_rate, is_alert) VALUES (?, ?, ?, ?, ?)"+
+            "ON CONFLICT (time, thingid) DO NOTHING";
             initializeJdbc();
         }
 

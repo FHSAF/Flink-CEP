@@ -205,8 +205,8 @@ public class Main {
                             .name("RawSmartwatchDbSink");
             emgStream.sinkTo(new EMGRawDbSink(dbUrlBase, DBConfig.EMG_DB_NAME, dbUser, dbPassword)) // Passes base URL and DB name
                      .name("RawEMGDbSink");
-            // gazeStream.sinkTo(new EyeGazeRawDbSink(dbUrlBase + DBConfig.EYEGAZE_DB_NAME, DBConfig.EYEGAZE_RAW_TABLE, dbUser, dbPassword)) // Assumes config exists
-            //           .name("RawEyeGazeDbSink"); // Optional Raw Gaze Sink
+            gazeStream.sinkTo(new EyeGazeRawDbSink(dbUrlBase + DBConfig.GAZE_STATE_DB_NAME, DBConfig.GAZE_STATE_TABLE, dbUser, dbPassword)) // Assumes config exists
+                      .name("RawEyeGazeDbSink"); // Optional Raw Gaze Sink
 
             // Processed Data Sinks
             averageAngleAlerts.sinkTo(new AvgAngleAlertDbSink(dbUrlBase + DBConfig.ROKOKO_AVERAGE_DB_NAME, DBConfig.ROKOKO_AVERAGE_DB_TABLE, dbUser, dbPassword))
@@ -217,8 +217,8 @@ public class Main {
                             .name("EMGFatigueAlertDbSink");
             // smartwatchAvgHrAlerts.sinkTo(new SmartwatchAvgHrDbSink(dbUrlBase + DBConfig.SMARTWATCH_AVERAGE_DB_NAME, DBConfig.SMARTWATCH_AVERAGE_DB_TABLE, dbUser, dbPassword)) // Assumes config exists
             //                      .name("SmartwatchAvgHrDbSink"); // Optional Avg HR Sink
-            // gazeAlerts.sinkTo(new EyeGazeAttentionAlertDbSink(dbUrlBase + DBConfig.EYEGAZE_DB_NAME, DBConfig.EYEGAZE_ALERT_TABLE, dbUser, dbPassword)) // Assumes config exists
-            //           .name("EyeGazeAlertDbSink"); // Optional Gaze Alert Sink
+            gazeAlerts.sinkTo(new EyeGazeAttentionAlertDbSink(dbUrlBase + DBConfig.GAZE_STATE_DB_NAME, DBConfig.GAZE_STATE_ALERT_TABLE, dbUser, dbPassword)) // Assumes config exists
+                      .name("EyeGazeAlertDbSink"); // Optional Gaze Alert Sink
 
 
             logger.info("#############################################");
