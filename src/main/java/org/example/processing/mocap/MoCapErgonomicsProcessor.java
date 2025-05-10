@@ -34,8 +34,8 @@ public class MoCapErgonomicsProcessor {
 
     // --- Thresholds Map (Keep as is) ---
     private static final Map<String, double[]> thresholds = Map.ofEntries(
-            Map.entry("Elbow Flex Left", new double[]{60, 100, 10, 10}),
-            Map.entry("Elbow Flex Right", new double[]{60, 100, 10, 10}),
+            Map.entry("Elbow Flex Left", new double[]{5, 100, 10, 10}),
+            Map.entry("Elbow Flex Right", new double[]{5, 100, 10, 10}),
             Map.entry("Shoulder Flex Left", new double[]{-20, 60, 10, 10}),
             Map.entry("Shoulder Flex Right", new double[]{-20, 60, 10, 10}),
             Map.entry("Shoulder Abduction Left", new double[]{-90, 90, 15, 15}),
@@ -77,7 +77,7 @@ public class MoCapErgonomicsProcessor {
 
     // --- Timestamp Parser MapFunction (If needed, adapt from ErgonomicsProcessor) ---
      public static class TimestampParser implements MapFunction<MoCapReading, TimestampedMoCapReading> {
-        private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+        private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
         @Override
         public TimestampedMoCapReading map(MoCapReading value) throws Exception {
             if (value == null || value.getTimestamp() == null) return null;
@@ -128,11 +128,31 @@ public class MoCapErgonomicsProcessor {
                         alertJson.put("feedbackType", "averageAngleAlert"); // Keep type name consistent
                         ArrayNode jointAlerts = alertJson.putArray("alerts");
 
-                        // Check all average angles against thresholds
+                        // --- Completed: Check all average angles against thresholds ---
                         checkAverageAndAddAlert(jointAlerts, "Elbow Flex Left", avgAngles.avgElbowFlexExtLeft);
                         checkAverageAndAddAlert(jointAlerts, "Elbow Flex Right", avgAngles.avgElbowFlexExtRight);
-                        // ... Add checks for ALL other joints as before ...
+                        checkAverageAndAddAlert(jointAlerts, "Shoulder Flex Left", avgAngles.avgShoulderFlexExtLeft);
+                        checkAverageAndAddAlert(jointAlerts, "Shoulder Flex Right", avgAngles.avgShoulderFlexExtRight);
+                        checkAverageAndAddAlert(jointAlerts, "Shoulder Abduction Left", avgAngles.avgShoulderAbdAddLeft);
+                        checkAverageAndAddAlert(jointAlerts, "Shoulder Abduction Right", avgAngles.avgShoulderAbdAddRight);
+                        checkAverageAndAddAlert(jointAlerts, "Lower Arm Pronation Left", avgAngles.avgLowerarmPronSupLeft);
+                        checkAverageAndAddAlert(jointAlerts, "Lower Arm Pronation Right", avgAngles.avgLowerarmPronSupRight);
+                        checkAverageAndAddAlert(jointAlerts, "Upper Arm Rotation Left", avgAngles.avgUpperarmRotationLeft);
+                        checkAverageAndAddAlert(jointAlerts, "Upper Arm Rotation Right", avgAngles.avgUpperarmRotationRight);
+                        checkAverageAndAddAlert(jointAlerts, "Wrist Flex Left", avgAngles.avgHandFlexExtLeft);
+                        checkAverageAndAddAlert(jointAlerts, "Wrist Flex Right", avgAngles.avgHandFlexExtRight);
+                        checkAverageAndAddAlert(jointAlerts, "Wrist Radial/Ulnar Left", avgAngles.avgHandRadialUlnarLeft);
+                        checkAverageAndAddAlert(jointAlerts, "Wrist Radial/Ulnar Right", avgAngles.avgHandRadialUlnarRight);
+                        checkAverageAndAddAlert(jointAlerts, "Neck Flex", avgAngles.avgNeckFlexExt);
+                        checkAverageAndAddAlert(jointAlerts, "Neck Torsion", avgAngles.avgNeckTorsion);
+                        checkAverageAndAddAlert(jointAlerts, "Head Tilt", avgAngles.avgHeadTilt);
+                        checkAverageAndAddAlert(jointAlerts, "Torso Tilt", avgAngles.avgTorsoTilt);
+                        checkAverageAndAddAlert(jointAlerts, "Torso Side Tilt", avgAngles.avgTorsoSideTilt);
+                        checkAverageAndAddAlert(jointAlerts, "Back Curve", avgAngles.avgBackCurve);
+                        checkAverageAndAddAlert(jointAlerts, "Back Torsion", avgAngles.avgBackTorsion);
+                        checkAverageAndAddAlert(jointAlerts, "Knee Flex Left", avgAngles.avgKneeFlexExtLeft);
                         checkAverageAndAddAlert(jointAlerts, "Knee Flex Right", avgAngles.avgKneeFlexExtRight);
+                        // --- End Completed Check ---
 
                         if (jointAlerts.size() > 0) {
                            logger.info("Average Angle Alert Generated for {}: {}", avgAngles.thingId, alertJson.toString());
@@ -169,19 +189,36 @@ public class MoCapErgonomicsProcessor {
          }
     }
 
-    // --- POJO Class AverageJointAngles (Keep as is) ---
+    // --- Completed POJO Class AverageJointAngles ---
     public static class AverageJointAngles implements Serializable {
-        // (Keep all fields and constructor from ErgonomicsProcessor)
-        private static final long serialVersionUID = 2L;
+        private static final long serialVersionUID = 2L; // Different ID
         public String thingId;
         public long windowEnd;
         public double avgElbowFlexExtLeft;
         public double avgElbowFlexExtRight;
         public double avgShoulderFlexExtLeft;
-        // ... all other average fields ...
+        public double avgShoulderFlexExtRight;
+        public double avgShoulderAbdAddLeft;
+        public double avgShoulderAbdAddRight;
+        public double avgLowerarmPronSupLeft;
+        public double avgLowerarmPronSupRight;
+        public double avgUpperarmRotationLeft;
+        public double avgUpperarmRotationRight;
+        public double avgHandFlexExtLeft;
+        public double avgHandFlexExtRight;
+        public double avgHandRadialUlnarLeft;
+        public double avgHandRadialUlnarRight;
+        public double avgNeckFlexExt;
+        public double avgNeckTorsion;
+        public double avgHeadTilt;
+        public double avgTorsoTilt;
+        public double avgTorsoSideTilt;
+        public double avgBackCurve;
+        public double avgBackTorsion;
+        public double avgKneeFlexExtLeft;
         public double avgKneeFlexExtRight;
         public AverageJointAngles() {}
-     }
+    }
 
     // --- Flink Windowing Functions ---
     // Accumulator needs to work with MoCapReading now
@@ -196,7 +233,26 @@ public class MoCapErgonomicsProcessor {
              if (s == null) return;
              accumulate("Elbow Flex Left", s.getElbowFlexExtLeft());
              accumulate("Elbow Flex Right", s.getElbowFlexExtRight());
-             // ... Add accumulate calls for ALL joints from MoCapReading ...
+             accumulate("Shoulder Flex Left", s.getShoulderFlexExtLeft());
+             accumulate("Shoulder Flex Right", s.getShoulderFlexExtRight());
+             accumulate("Shoulder Abduction Left", s.getShoulderAbdAddLeft());
+             accumulate("Shoulder Abduction Right", s.getShoulderAbdAddRight());
+             accumulate("Lower Arm Pronation Left", s.getLowerarmPronSupLeft());
+             accumulate("Lower Arm Pronation Right", s.getLowerarmPronSupRight());
+             accumulate("Upper Arm Rotation Left", s.getUpperarmRotationLeft());
+             accumulate("Upper Arm Rotation Right", s.getUpperarmRotationRight());
+             accumulate("Wrist Flex Left", s.getHandFlexExtLeft());
+             accumulate("Wrist Flex Right", s.getHandFlexExtRight());
+             accumulate("Wrist Radial/Ulnar Left", s.getHandRadialUlnarLeft());
+             accumulate("Wrist Radial/Ulnar Right", s.getHandRadialUlnarRight());
+             accumulate("Neck Flex", s.getNeckFlexExt());
+             accumulate("Neck Torsion", s.getNeckTorsion());
+             accumulate("Head Tilt", s.getHeadTilt());
+             accumulate("Torso Tilt", s.getTorsoTilt());
+             accumulate("Torso Side Tilt", s.getTorsoSideTilt());
+             accumulate("Back Curve", s.getBackCurve());
+             accumulate("Back Torsion", s.getBackTorsion());
+             accumulate("Knee Flex Left", s.getKneeFlexExtLeft());
              accumulate("Knee Flex Right", s.getKneeFlexExtRight());
         }
         private void accumulate(String jointName, double value) {
@@ -209,7 +265,26 @@ public class MoCapErgonomicsProcessor {
             result.thingId = this.thingId;
             result.avgElbowFlexExtLeft = getAverage("Elbow Flex Left");
             result.avgElbowFlexExtRight = getAverage("Elbow Flex Right");
-            // ... Set ALL other average fields ...
+            result.avgShoulderFlexExtLeft = getAverage("Shoulder Flex Left");
+            result.avgShoulderFlexExtRight = getAverage("Shoulder Flex Right");
+            result.avgShoulderAbdAddLeft = getAverage("Shoulder Abduction Left");
+            result.avgShoulderAbdAddRight = getAverage("Shoulder Abduction Right");
+            result.avgLowerarmPronSupLeft = getAverage("Lower Arm Pronation Left");
+            result.avgLowerarmPronSupRight = getAverage("Lower Arm Pronation Right");
+            result.avgUpperarmRotationLeft = getAverage("Upper Arm Rotation Left");
+            result.avgUpperarmRotationRight = getAverage("Upper Arm Rotation Right");
+            result.avgHandFlexExtLeft = getAverage("Wrist Flex Left");
+            result.avgHandFlexExtRight = getAverage("Wrist Flex Right");
+            result.avgHandRadialUlnarLeft = getAverage("Wrist Radial/Ulnar Left");
+            result.avgHandRadialUlnarRight = getAverage("Wrist Radial/Ulnar Right");
+            result.avgNeckFlexExt = getAverage("Neck Flex");
+            result.avgNeckTorsion = getAverage("Neck Torsion");
+            result.avgHeadTilt = getAverage("Head Tilt");
+            result.avgTorsoTilt = getAverage("Torso Tilt");
+            result.avgTorsoSideTilt = getAverage("Torso Side Tilt");
+            result.avgBackCurve = getAverage("Back Curve");
+            result.avgBackTorsion = getAverage("Back Torsion");
+            result.avgKneeFlexExtLeft = getAverage("Knee Flex Left");
             result.avgKneeFlexExtRight = getAverage("Knee Flex Right");
             return result;
          }

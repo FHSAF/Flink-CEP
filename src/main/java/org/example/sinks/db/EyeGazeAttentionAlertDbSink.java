@@ -14,10 +14,14 @@ import com.google.gson.JsonSyntaxException;
 import java.io.IOException;
 import java.io.Serializable;
 import java.sql.*;
+import java.time.Instant; // Use Instant for ISO parsing
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 
-// NEW Sink - Handles String JSON alerts from EyeGazeAttentionProcessor
 public class EyeGazeAttentionAlertDbSink implements Sink<String> {
     private static final Logger logger = LoggerFactory.getLogger(EyeGazeAttentionAlertDbSink.class);
+    // Standard ISO formatter
+    private static final DateTimeFormatter ISO_FORMATTER = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
 
     private final String jdbcUrl;
     private final String username;
@@ -36,7 +40,6 @@ public class EyeGazeAttentionAlertDbSink implements Sink<String> {
         return new EyeGazeAttentionAlertDbSinkWriter(jdbcUrl, tableName, username, password);
     }
 
-     // Keep for potential backward compatibility
     @Override
     @Deprecated
     public SinkWriter<String> createWriter(InitContext context) throws IOException {
@@ -45,13 +48,12 @@ public class EyeGazeAttentionAlertDbSink implements Sink<String> {
     }
 
     private static class EyeGazeAttentionAlertDbSinkWriter implements SinkWriter<String>, Serializable {
-        private static final long serialVersionUID = 509L; // Unique ID
+        private static final long serialVersionUID = 509L;
 
         private final String insertSql;
         private final String jdbcUrl;
         private final String username;
         private final String password;
-
         private transient Connection connection;
         private transient PreparedStatement statement;
 
@@ -59,13 +61,13 @@ public class EyeGazeAttentionAlertDbSink implements Sink<String> {
             this.jdbcUrl = jdbcUrl;
             this.username = username;
             this.password = password;
-            // TODO: Define your table schema and corresponding INSERT SQL
-            // Example assumes columns: time, thingid, alert_timestamp, feedback_type, severity, reason, details_json
-            this.insertSql = "INSERT INTO " + tableName + " (time, thingid, alert_timestamp, feedback_type, severity, reason, details_json) VALUES (?, ?, ?, ?, ?, ?, ?::JSONB)";
+            // Added ON CONFLICT DO NOTHING/UPDATE (choose one)
+            this.insertSql = "INSERT INTO " + tableName + " (time, thingid, alert_timestamp, feedback_type, severity, reason, details_json) VALUES (?, ?, ?, ?, ?, ?, ?::JSONB) ON CONFLICT (time, thingid, feedback_type) DO NOTHING";
+            // Or: ON CONFLICT (time, thingid, feedback_type) DO UPDATE SET severity = EXCLUDED.severity, reason = EXCLUDED.reason, details_json = EXCLUDED.details_json";
             initializeJdbc();
         }
 
-         private void initializeJdbc() throws IOException {
+         private void initializeJdbc() throws IOException { /* ... keep existing logic ... */
              try {
                 this.connection = DriverManager.getConnection(jdbcUrl, username, password);
                 this.statement = connection.prepareStatement(this.insertSql);
@@ -74,47 +76,52 @@ public class EyeGazeAttentionAlertDbSink implements Sink<String> {
                 logger.error("EyeGazeAlert Sink: Failed JDBC connection", e);
                 throw new IOException("Failed JDBC connection", e);
             }
-        }
+         }
 
         @Override
         public void write(String jsonRecord, Context context) throws IOException {
             if (jsonRecord == null || jsonRecord.isEmpty()) { return; }
              checkConnection();
+            String thingId = "unknown";
+            Timestamp alertTs = null;
+            String feedbackType = "unknown_gaze_alert"; // Default
 
             try {
-                // 1. Parse JSON
                 JsonObject alertJson = JsonParser.parseString(jsonRecord).getAsJsonObject();
+                thingId = alertJson.has("thingId") ? alertJson.get("thingId").getAsString() : "unknown";
+                feedbackType = alertJson.has("feedbackType") ? alertJson.get("feedbackType").getAsString() : "unknown_gaze_alert";
 
-                // 2. Extract fields (handle potential missing fields)
-                String thingId = alertJson.has("thingId") ? alertJson.get("thingId").getAsString() : "unknown";
-                Long alertTimestampMillis = alertJson.has("alertTimestamp") ? alertJson.get("alertTimestamp").getAsLong() : // Check duration alert field
-                                            (alertJson.has("windowEndTimestamp") ? alertJson.get("windowEndTimestamp").getAsLong() : null); // Check average alert field
-                String feedbackType = alertJson.has("feedbackType") ? alertJson.get("feedbackType").getAsString() : "unknown_gaze_alert";
+                // Use alertTimestamp or windowEndTimestamp from JSON to create the SQL Timestamp
+                Long alertTimestampMillis = alertJson.has("alertTimestamp") ? alertJson.get("alertTimestamp").getAsLong() :
+                                            (alertJson.has("windowEndTimestamp") ? alertJson.get("windowEndTimestamp").getAsLong() : null);
+
+                if (alertTimestampMillis != null) {
+                    alertTs = new Timestamp(alertTimestampMillis);
+                } else {
+                    logger.warn("EyeGazeAlert Sink: Missing alert/window timestamp in JSON for {}. Storing NULL.", thingId);
+                    alertTs = null; // Ensure it's null
+                }
+
                 String severity = alertJson.has("severity") ? alertJson.get("severity").getAsString() : "UNKNOWN";
                 String reason = alertJson.has("reason") ? alertJson.get("reason").getAsString() : "N/A";
 
-                if (alertTimestampMillis == null) {
-                    logger.warn("EyeGazeAlert Sink: Missing alert timestamp in JSON for {}. Skipping.", thingId);
-                    return;
-                }
-                Timestamp alertTs = new Timestamp(alertTimestampMillis);
-
-                // 3. Set Parameters
-                statement.setTimestamp(1, alertTs); // time (hypertable)
+                // Set Parameters
+                if (alertTs != null) statement.setTimestamp(1, alertTs); else statement.setNull(1, Types.TIMESTAMP_WITH_TIMEZONE); // time
                 statement.setString(2, thingId);
-                statement.setTimestamp(3, alertTs); // alert_timestamp
+                if (alertTs != null) statement.setTimestamp(3, alertTs); else statement.setNull(3, Types.TIMESTAMP_WITH_TIMEZONE); // alert_timestamp
                 statement.setString(4, feedbackType);
                 statement.setString(5, severity);
                 statement.setString(6, reason);
-                statement.setString(7, jsonRecord); // Store full JSON in details_json
+                statement.setString(7, jsonRecord); // Store full JSON
 
-                // 4. Execute
                 statement.executeUpdate();
 
             } catch (JsonSyntaxException e) {
                  logger.error("EyeGazeAlert Sink: Error parsing JSON: {}", jsonRecord, e);
             } catch (SQLException e) {
-                logger.error("EyeGazeAlert Sink: Error inserting data: {}", jsonRecord, e);
+                 if (!"23505".equals(e.getSQLState())) { // Don't log duplicate key warnings if using ON CONFLICT
+                    logger.error("EyeGazeAlert Sink: Error inserting data: {}", jsonRecord, e);
+                 }
             } catch (Exception e) {
                  logger.error("EyeGazeAlert Sink: Unexpected error writing: {}", jsonRecord, e);
             }
@@ -124,14 +131,13 @@ public class EyeGazeAttentionAlertDbSink implements Sink<String> {
         public void flush(boolean endOfInput) throws IOException { /* No-op */ }
 
         @Override
-        public void close() throws IOException {
+        public void close() throws IOException { /* ... keep existing logic ... */
             closeSilently();
             logger.info("EyeGazeAlert Sink: Database connection closed.");
         }
 
-        // --- checkConnection and closeSilently helpers ---
-         private void checkConnection() throws IOException { /* ... */
-              if (connection == null) { initializeJdbc(); return; }
+        private void checkConnection() throws IOException { /* ... keep existing logic ... */
+            if (connection == null) { initializeJdbc(); return; }
             try {
                 if (!connection.isValid(1)) {
                     logger.warn("EyeGazeAlert Sink: JDBC connection is not valid. Reconnecting...");
@@ -143,12 +149,12 @@ public class EyeGazeAttentionAlertDbSink implements Sink<String> {
                  closeSilently();
                  initializeJdbc();
             }
-         }
-         private void closeSilently() { /* ... */
+        }
+        private void closeSilently() { /* ... keep existing logic ... */
              try { if (statement != null) statement.close(); } catch (SQLException ignored) {}
              try { if (connection != null) connection.close(); } catch (SQLException ignored) {}
              statement = null;
              connection = null;
-         }
+        }
     }
 }

@@ -22,7 +22,8 @@ import java.time.format.DateTimeParseException;
 // Renamed from SmartwatchSlidingWindowProcessor
 public class SmartwatchAvgHrProcessor {
     private static final Logger logger = LoggerFactory.getLogger(SmartwatchAvgHrProcessor.class);
-    private static final DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    // private static final DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final DateTimeFormatter ISO_TIMESTAMP_FORMATTER = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
 
     // Wrapper class needed if timestamp parsing happens here
     public static class TimestampedSmartwatchReading implements Serializable {
@@ -39,8 +40,10 @@ public class SmartwatchAvgHrProcessor {
         public TimestampedSmartwatchReading map(SmartwatchReading value) {
             if (value == null || value.getTimestamp() == null) return null;
             try {
-                LocalDateTime ldt = LocalDateTime.parse(value.getTimestamp(), formatter);
-                long timestampMillis = ldt.atZone(ZoneOffset.UTC).toInstant().toEpochMilli();
+                // LocalDateTime ldt = LocalDateTime.parse(value.getTimestamp(), formatter);
+                // long timestampMillis = ldt.atZone(ZoneOffset.UTC).toInstant().toEpochMilli();
+                Instant instant = Instant.from(ISO_TIMESTAMP_FORMATTER.parse(value.getTimestamp()));
+                long timestampMillis = instant.toEpochMilli();
                 return new TimestampedSmartwatchReading(timestampMillis, value);
             } catch (DateTimeParseException e) {
                 logger.warn("Invalid smartwatch timestamp format: {}. Skipping.", value.getTimestamp());

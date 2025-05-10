@@ -38,8 +38,8 @@ public class EyeGazeAttentionProcessor {
 
     // Configuration constants (Keep as is)
     private static final Duration AVG_ATTENTION_WINDOW_SIZE = Duration.ofMinutes(1);
-    private static final Duration AVG_ATTENTION_WINDOW_SLIDE = Duration.ofSeconds(15);
-    private static final double AVG_INATTENTION_THRESHOLD_PERCENT = 50.0;
+    private static final Duration AVG_ATTENTION_WINDOW_SLIDE = Duration.ofSeconds(20);
+    private static final double AVG_INATTENTION_THRESHOLD_PERCENT = 70.0;
 
     /**
      * Main processing pipeline for eye gaze analysis.

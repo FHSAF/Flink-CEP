@@ -1,35 +1,33 @@
-// File: Flink-CEP/src/main/java/org/example/sinks/db/MoCapRawDbSink.java
-package org.example.sinks.db; // Updated package
+package org.example.sinks.db;
 
 import java.sql.Timestamp;
 import org.apache.flink.api.connector.sink2.Sink;
 import org.apache.flink.api.connector.sink2.SinkWriter;
 import org.apache.flink.api.connector.sink2.WriterInitContext;
-import org.example.models.MoCapReading; // Updated model import
+import org.example.models.MoCapReading;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.io.Serializable; // Import Serializable
+import java.io.Serializable;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Types;
-import java.time.LocalDateTime;
-import java.time.ZoneOffset;
+import java.time.Instant; // Use Instant for ISO parsing
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 
-// Renamed from MoCapRawDatabaseSink
-public class MoCapRawDbSink implements Sink<MoCapReading> { // Implement Serializable
+public class MoCapRawDbSink implements Sink<MoCapReading> {
     private static final Logger logger = LoggerFactory.getLogger(MoCapRawDbSink.class);
-    private static final DateTimeFormatter TIMESTAMP_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss:SSS");
+    // *** CORRECTED FORMATTER to standard ISO ***
+    private static final DateTimeFormatter ISO_FORMATTER = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
 
     private final String jdbcUrl;
     private final String username;
     private final String password;
-    private final String tableName; // Make table name configurable
+    private final String tableName;
 
     public MoCapRawDbSink(String jdbcUrl, String tableName, String username, String password) {
         this.jdbcUrl = jdbcUrl;
@@ -43,7 +41,6 @@ public class MoCapRawDbSink implements Sink<MoCapReading> { // Implement Seriali
         return new MoCapRawDbSinkWriter(jdbcUrl, tableName, username, password);
     }
 
-    // Keep for potential backward compatibility
     @Override
     @Deprecated
     public SinkWriter<MoCapReading> createWriter(InitContext context) throws IOException {
@@ -52,15 +49,12 @@ public class MoCapRawDbSink implements Sink<MoCapReading> { // Implement Seriali
     }
 
     private static class MoCapRawDbSinkWriter implements SinkWriter<MoCapReading>, Serializable {
-        private static final long serialVersionUID = 501L; // Unique ID
+        private static final long serialVersionUID = 501L;
 
-        // Dynamic SQL based on table name
         private final String insertSql;
-
         private final String jdbcUrl;
         private final String username;
         private final String password;
-
         private transient Connection connection;
         private transient PreparedStatement statement;
 
@@ -68,20 +62,15 @@ public class MoCapRawDbSink implements Sink<MoCapReading> { // Implement Seriali
             this.jdbcUrl = jdbcUrl;
             this.username = username;
             this.password = password;
-            // Construct SQL dynamically - CAUTION: Ensure tableName is safe if user-provided elsewhere
+            // Added ON CONFLICT DO NOTHING
             this.insertSql = "INSERT INTO " + tableName + " (" +
-                "time, thingid, timestamp_str, " + // Added time and timestamp_str
-                "elbow_flex_ext_left, elbow_flex_ext_right, " +
-                "shoulder_flex_ext_left, shoulder_flex_ext_right, " +
-                "shoulder_abd_add_left, shoulder_abd_add_right, " +
-                "lowerarm_pron_sup_left, lowerarm_pron_sup_right, " +
-                "upperarm_rotation_left, upperarm_rotation_right, " +
-                "hand_flex_ext_left, hand_flex_ext_right, " +
-                "hand_radial_ulnar_left, hand_radial_ulnar_right, " +
-                "neck_flex_ext, neck_torsion, head_tilt, torso_tilt, " +
-                "torso_side_tilt, back_curve, back_torsion, " +
-                "knee_flex_ext_left, knee_flex_ext_right " +
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"; // 25 placeholders
+                "time, thingid, timestamp_str, " +
+                "elbow_flex_ext_left, elbow_flex_ext_right, shoulder_flex_ext_left, shoulder_flex_ext_right, " +
+                "shoulder_abd_add_left, shoulder_abd_add_right, lowerarm_pron_sup_left, lowerarm_pron_sup_right, " +
+                "upperarm_rotation_left, upperarm_rotation_right, hand_flex_ext_left, hand_flex_ext_right, " +
+                "hand_radial_ulnar_left, hand_radial_ulnar_right, neck_flex_ext, neck_torsion, head_tilt, " +
+                "torso_tilt, torso_side_tilt, back_curve, back_torsion, knee_flex_ext_left, knee_flex_ext_right " +
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ";
             initializeJdbc();
         }
 
@@ -102,28 +91,35 @@ public class MoCapRawDbSink implements Sink<MoCapReading> { // Implement Seriali
                 logger.warn("MoCapRaw Sink: Received null or incomplete record. Skipping.");
                 return;
             }
-             checkConnection(); // Ensure connection is valid
+             checkConnection();
+
+            Timestamp sqlTimestamp = null;
+            String originalTimestampStr = record.getTimestamp();
+            try {
+                // *** Parse the ISO string using the CORRECT formatter ***
+                Instant instant = Instant.from(ISO_FORMATTER.parse(originalTimestampStr));
+                sqlTimestamp = Timestamp.from(instant);
+            } catch (DateTimeParseException | NullPointerException e) {
+                logger.warn("MoCapRaw Sink: Failed to parse ISO timestamp '{}' for {}. Storing NULL for time.", originalTimestampStr, record.getThingid());
+                sqlTimestamp = null;
+            } catch (Exception e) {
+                 logger.error("MoCapRaw Sink: Unexpected error parsing timestamp '{}' for {}.", originalTimestampStr, record.getThingid(), e);
+                 sqlTimestamp = null;
+            }
+
+            // *** Skip insert if timestamp parsing failed ***
+             if (sqlTimestamp == null) {
+                 logger.error("MoCapRaw Sink: Skipping insert for {} due to failed timestamp parsing (time column cannot be NULL).", record.getThingid());
+                 return;
+             }
 
             try {
-                // 1. Parse Timestamp
-                Timestamp sqlTimestamp = null;
-                try {
-                     LocalDateTime ldt = LocalDateTime.parse(record.getTimestamp(), TIMESTAMP_FORMATTER);
-                     sqlTimestamp = Timestamp.from(ldt.toInstant(ZoneOffset.UTC)); // Assuming UTC
-                } catch (DateTimeParseException | NullPointerException e) {
-                    logger.warn("MoCapRaw Sink: Failed to parse timestamp string '{}' for {}. Storing NULL for time.", record.getTimestamp(), record.getThingid());
-                }
-
-                // 2. Set Parameters
-                if (sqlTimestamp != null) {
-                    statement.setTimestamp(1, sqlTimestamp); // time (hypertable column)
-                 } else {
-                     statement.setNull(1, Types.TIMESTAMP_WITH_TIMEZONE);
-                     logger.error("MoCapRaw Sink: Inserting NULL for hypertable time column for {}. This might fail.", record.getThingid());
-                 }
+                // Set Parameters
+                statement.setTimestamp(1, sqlTimestamp); // time (parsed)
                 statement.setString(2, record.getThingid());
-                statement.setString(3, record.getTimestamp()); // timestamp_str
+                statement.setString(3, originalTimestampStr); // timestamp_str (original)
 
+                // Set remaining parameters (4 to 26)
                 statement.setDouble(4, record.getElbowFlexExtLeft());
                 statement.setDouble(5, record.getElbowFlexExtRight());
                 statement.setDouble(6, record.getShoulderFlexExtLeft());
@@ -146,23 +142,22 @@ public class MoCapRawDbSink implements Sink<MoCapReading> { // Implement Seriali
                 statement.setDouble(23, record.getBackCurve());
                 statement.setDouble(24, record.getBackTorsion());
                 statement.setDouble(25, record.getKneeFlexExtLeft());
-                statement.setDouble(26, record.getKneeFlexExtRight()); // Index corrected to 26
+                statement.setDouble(26, record.getKneeFlexExtRight());
 
-                // 3. Execute Update
                 statement.executeUpdate();
-                // logger.debug("MoCapRaw Sink: Inserted raw MoCap record for {}", record.getThingid());
 
             } catch (SQLException e) {
-                logger.error("MoCapRaw Sink: Error inserting raw MoCap data for {}: {}", record.getThingid(), e.getMessage());
+                 // ON CONFLICT handles duplicate keys silently
+                 if (!"23505".equals(e.getSQLState())) {
+                    logger.error("MoCapRaw Sink: Error inserting raw MoCap data for {}: {}", record.getThingid(), e.getMessage());
+                 }
             } catch (Exception e) {
                 logger.error("MoCapRaw Sink: Unexpected error writing raw MoCap record for {}: {}", record.getThingid(), e.getMessage());
             }
         }
 
         @Override
-        public void flush(boolean endOfInput) throws IOException {
-            // No-op
-        }
+        public void flush(boolean endOfInput) throws IOException { /* No-op */ }
 
         @Override
         public void close() throws IOException {
@@ -170,9 +165,8 @@ public class MoCapRawDbSink implements Sink<MoCapReading> { // Implement Seriali
             logger.info("MoCapRaw Sink: Database connection closed.");
         }
 
-        // --- checkConnection and closeSilently helpers (same as in EMGRawDbSink) ---
-         private void checkConnection() throws IOException { /* ... */
-              if (connection == null) { initializeJdbc(); return; }
+        private void checkConnection() throws IOException {
+            if (connection == null) { initializeJdbc(); return; }
             try {
                 if (!connection.isValid(1)) {
                     logger.warn("MoCapRaw Sink: JDBC connection is not valid. Reconnecting...");
@@ -184,12 +178,12 @@ public class MoCapRawDbSink implements Sink<MoCapReading> { // Implement Seriali
                  closeSilently();
                  initializeJdbc();
             }
-         }
-         private void closeSilently() { /* ... */
-              try { if (statement != null) statement.close(); } catch (SQLException ignored) {}
+        }
+        private void closeSilently() {
+             try { if (statement != null) statement.close(); } catch (SQLException ignored) {}
              try { if (connection != null) connection.close(); } catch (SQLException ignored) {}
              statement = null;
              connection = null;
-         }
+        }
     }
 }

@@ -91,7 +91,7 @@ public class Main {
     private static final double REBA_TASK_LOAD_KG = 1.0;
     private static final int REBA_COUPLING_SCORE = 0;
     private static final int REBA_ACTIVITY_SCORE = 1;
-    private static final Duration EYE_GAZE_DURATION_THRESHOLD = Duration.ofSeconds(15); // Example: Alert if inattentive for 15s
+    private static final Duration EYE_GAZE_DURATION_THRESHOLD = Duration.ofSeconds(5); // Example: Alert if inattentive for 15s
 
 
     public static void main(String[] args) {

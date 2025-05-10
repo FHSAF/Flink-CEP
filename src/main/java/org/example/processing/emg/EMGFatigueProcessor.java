@@ -22,11 +22,13 @@ import org.apache.flink.streaming.api.windowing.assigners.SlidingEventTimeWindow
 import org.apache.flink.streaming.api.windowing.windows.TimeWindow;
 import org.apache.flink.util.Collector;
 import org.example.models.EMGReading; // Updated model import
+import org.example.processing.eyegaze.EyeGazeAttentionProcessor.TimestampedGazeReading;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.Serializable;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
@@ -46,7 +48,8 @@ public class EMGFatigueProcessor {
     private static final Duration FATIGUE_TREND_WINDOW_DURATION = Duration.ofSeconds(30);
     private static final double HIGH_RMS_THRESHOLD = 50.0; // EXAMPLE - NEEDS CALIBRATION!
     private static final int MIN_HISTORY_SIZE_FOR_ALERT = 10;
-    private static final DateTimeFormatter TIMESTAMP_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    // private static final DateTimeFormatter TIMESTAMP_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final DateTimeFormatter ISO_TIMESTAMP_FORMATTER = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
 
     /**
      * Main processing pipeline for EMG fatigue detection based on RMS trend.
@@ -111,8 +114,11 @@ public class EMGFatigueProcessor {
         public TimestampedEMGReading map(EMGReading value) {
             if (value == null || value.getTimestamp() == null) return null;
             try {
-                LocalDateTime ldt = LocalDateTime.parse(value.getTimestamp(), TIMESTAMP_FORMATTER);
-                long timestampMillis = ldt.toInstant(ZoneOffset.UTC).toEpochMilli();
+                Instant instant = Instant.from(ISO_TIMESTAMP_FORMATTER.parse(value.getTimestamp()));
+                long timestampMillis = instant.toEpochMilli();
+
+                // LocalDateTime ldt = LocalDateTime.parse(value.getTimestamp(), TIMESTAMP_FORMATTER);
+                // long timestampMillis = ldt.toInstant(ZoneOffset.UTC).toEpochMilli();
                 return new TimestampedEMGReading(timestampMillis, value);
             } catch (Exception e) {
                 logger.warn("EMG Parser: Failed to parse timestamp string: {}. Skipping.", value.getTimestamp(), e);

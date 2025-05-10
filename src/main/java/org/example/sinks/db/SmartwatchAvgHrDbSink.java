@@ -11,12 +11,10 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.io.Serializable;
 import java.sql.*;
-import com.google.gson.JsonObject; // Using Gson for parsing the string input
+import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonSyntaxException;
 
-
-// NEW Sink - Handles String output from SmartwatchAvgHrProcessor
 public class SmartwatchAvgHrDbSink implements Sink<String> {
     private static final Logger logger = LoggerFactory.getLogger(SmartwatchAvgHrDbSink.class);
 
@@ -37,7 +35,6 @@ public class SmartwatchAvgHrDbSink implements Sink<String> {
         return new SmartwatchAvgHrDbSinkWriter(jdbcUrl, tableName, username, password);
     }
 
-     // Keep for potential backward compatibility
     @Override
     @Deprecated
     public SinkWriter<String> createWriter(InitContext context) throws IOException {
@@ -46,13 +43,12 @@ public class SmartwatchAvgHrDbSink implements Sink<String> {
     }
 
     private static class SmartwatchAvgHrDbSinkWriter implements SinkWriter<String>, Serializable {
-        private static final long serialVersionUID = 507L; // Unique ID
+        private static final long serialVersionUID = 507L;
 
         private final String insertSql;
         private final String jdbcUrl;
         private final String username;
         private final String password;
-
         private transient Connection connection;
         private transient PreparedStatement statement;
 
@@ -60,14 +56,13 @@ public class SmartwatchAvgHrDbSink implements Sink<String> {
             this.jdbcUrl = jdbcUrl;
             this.username = username;
             this.password = password;
-            // TODO: Define your table schema and corresponding INSERT SQL
-            // Example assumes columns: time, thingid, window_end_ts, avg_heart_rate, is_alert
-            this.insertSql = "INSERT INTO " + tableName + " (time, thingid, window_end_ts, avg_heart_rate, is_alert) VALUES (?, ?, ?, ?, ?)"+
-            "ON CONFLICT (time, thingid) DO NOTHING";
+            // Added ON CONFLICT DO NOTHING/UPDATE (choose one)
+            this.insertSql = "INSERT INTO " + tableName + " (time, thingid, window_end_ts, avg_heart_rate, is_alert) VALUES (?, ?, ?, ?, ?) ON CONFLICT (time, thingid) DO NOTHING";
+            // Or: "ON CONFLICT (time, thingid) DO UPDATE SET avg_heart_rate = EXCLUDED.avg_heart_rate, is_alert = EXCLUDED.is_alert";
             initializeJdbc();
         }
 
-        private void initializeJdbc() throws IOException {
+        private void initializeJdbc() throws IOException { /* ... keep existing logic ... */
              try {
                 this.connection = DriverManager.getConnection(jdbcUrl, username, password);
                 this.statement = connection.prepareStatement(this.insertSql);
@@ -83,65 +78,45 @@ public class SmartwatchAvgHrDbSink implements Sink<String> {
             if (recordString == null || recordString.isEmpty()) { return; }
              checkConnection();
 
-            // TODO: Implement parsing logic for the String record
-            // This depends on the EXACT format produced by SmartwatchAvgHrProcessor.
-            // Assuming it's a simple string like "Smartwatch Avg HR [thingId] [start - end]: avg bpm [🚨 ALERT]"
-            // A more robust way would be to output JSON from the processor.
-            // --- Example Parsing (Needs refinement based on actual string format) ---
             String thingId = "unknown";
-            long windowEndMillis = System.currentTimeMillis(); // Default if parsing fails
-            double avgHr = Double.NaN;
-            boolean isAlert = false;
+            Long windowEndMillis = null;
+            Double avgHr = null;
+            Boolean isAlert = null;
+            Timestamp windowEndTs = null; // Initialize
 
             try {
-                 // Basic parsing - VERY FRAGILE, assumes specific format
-                 if (recordString.contains("ALERT:")) {
-                     isAlert = true;
-                     recordString = recordString.replace(" 🚨 ALERT: High average heart rate!", "").trim();
-                 }
-                 String[] parts = recordString.split("]:");
-                 if (parts.length > 1) {
-                     String keyPart = parts[0]; // "Smartwatch Avg HR [thingId] [start - end"
-                     String valuePart = parts[1].trim().replace(" bpm", ""); // "avg"
+                // Assuming processor outputs JSON: {"thingId":"..", "windowEndTimestamp":123..., "averageHeartRate":75.5, "isAlert":false}
+                JsonObject jsonObject = JsonParser.parseString(recordString).getAsJsonObject();
+                thingId = jsonObject.has("thingId") ? jsonObject.get("thingId").getAsString() : "unknown";
+                windowEndMillis = jsonObject.has("windowEndTimestamp") ? jsonObject.get("windowEndTimestamp").getAsLong() : null;
+                avgHr = jsonObject.has("averageHeartRate") && !jsonObject.get("averageHeartRate").isJsonNull() ? jsonObject.get("averageHeartRate").getAsDouble() : null;
+                isAlert = jsonObject.has("isAlert") ? jsonObject.get("isAlert").getAsBoolean() : false;
 
-                     // Extract thingId (assuming format like "[thingId]")
-                     int idStart = keyPart.indexOf('[');
-                     int idEnd = keyPart.indexOf(']');
-                     if (idStart != -1 && idEnd != -1 && idEnd > idStart) {
-                         thingId = keyPart.substring(idStart + 1, idEnd);
-                     }
+                if (windowEndMillis == null) {
+                    logger.warn("SmartwatchAvgHr Sink: Missing windowEndTimestamp in JSON: {}. Using current time.", recordString);
+                    windowEndMillis = System.currentTimeMillis(); // Fallback
+                }
+                windowEndTs = new Timestamp(windowEndMillis);
 
-                     // Extract window end (more complex, might need regex or better format)
-                     // For simplicity, we'll just use current time or a fixed value if needed
-                     // Timestamp windowEndTs = new Timestamp(windowEndMillis);
-
-                     // Extract avgHr
-                     avgHr = Double.parseDouble(valuePart);
-                 } else {
-                     logger.warn("SmartwatchAvgHr Sink: Could not parse record string format: {}", recordString);
-                 }
-
-            } catch (Exception e) {
-                logger.error("SmartwatchAvgHr Sink: Error parsing record string: {}", recordString, e);
-                // Decide how to handle - skip, insert defaults?
-                return; // Skip for now
+            } catch (JsonSyntaxException | IllegalStateException | NullPointerException e) {
+                logger.error("SmartwatchAvgHr Sink: Error parsing record string as JSON: {}", recordString, e);
+                return; // Skip if parsing fails
             }
-            // --- End Example Parsing ---
-
 
             try {
-                Timestamp windowEndTs = new Timestamp(windowEndMillis); // Use parsed/defaulted end time
-
-                statement.setTimestamp(1, windowEndTs); // time (hypertable column)
+                // Set parameters
+                statement.setTimestamp(1, windowEndTs); // time (using window end)
                 statement.setString(2, thingId);
                 statement.setTimestamp(3, windowEndTs); // window_end_ts
-                if (!Double.isNaN(avgHr)) statement.setDouble(4, avgHr); else statement.setNull(4, Types.DOUBLE);
-                statement.setBoolean(5, isAlert);
+                if (avgHr != null) statement.setDouble(4, avgHr); else statement.setNull(4, Types.DOUBLE);
+                if (isAlert != null) statement.setBoolean(5, isAlert); else statement.setNull(5, Types.BOOLEAN);
 
                 statement.executeUpdate();
 
             } catch (SQLException e) {
-                logger.error("SmartwatchAvgHr Sink: Error inserting data: {}", recordString, e);
+                 if (!"23505".equals(e.getSQLState())) { // Don't log duplicate key warnings if using ON CONFLICT
+                    logger.error("SmartwatchAvgHr Sink: Error inserting data: {}", recordString, e);
+                 }
             } catch (Exception e) {
                  logger.error("SmartwatchAvgHr Sink: Unexpected error writing: {}", recordString, e);
             }
@@ -151,14 +126,13 @@ public class SmartwatchAvgHrDbSink implements Sink<String> {
         public void flush(boolean endOfInput) throws IOException { /* No-op */ }
 
         @Override
-        public void close() throws IOException {
+        public void close() throws IOException { /* ... keep existing logic ... */
             closeSilently();
             logger.info("SmartwatchAvgHr Sink: Database connection closed.");
         }
 
-        // --- checkConnection and closeSilently helpers ---
-         private void checkConnection() throws IOException { /* ... */
-              if (connection == null) { initializeJdbc(); return; }
+        private void checkConnection() throws IOException { /* ... keep existing logic ... */
+            if (connection == null) { initializeJdbc(); return; }
             try {
                 if (!connection.isValid(1)) {
                     logger.warn("SmartwatchAvgHr Sink: JDBC connection is not valid. Reconnecting...");
@@ -170,12 +144,12 @@ public class SmartwatchAvgHrDbSink implements Sink<String> {
                  closeSilently();
                  initializeJdbc();
             }
-         }
-         private void closeSilently() { /* ... */
+        }
+        private void closeSilently() { /* ... keep existing logic ... */
              try { if (statement != null) statement.close(); } catch (SQLException ignored) {}
              try { if (connection != null) connection.close(); } catch (SQLException ignored) {}
              statement = null;
              connection = null;
-         }
+        }
     }
 }
